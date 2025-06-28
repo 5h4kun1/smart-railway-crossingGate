@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset='UTF-8'>
+  <meta name='viewport' content='width=device-width, initial-scale=1.0'>
+  <title>Railway Crossing Control</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: Arial, sans-serif; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; min-height: 100vh; }
+    .container { max-width: 600px; margin: 0 auto; padding: 20px; background: rgba(255,255,255,0.1); border-radius: 15px; backdrop-filter: blur(10px); box-shadow: 0 8px 32px rgba(0,0,0,0.3); margin-top: 20px; }
+    h1 { text-align: center; margin-bottom: 30px; text-shadow: 2px 2px 4px rgba(0,0,0,0.3); }
+    .status-box { background: rgba(255,255,255,0.2); padding: 20px; border-radius: 10px; margin: 20px 0; border-left: 4px solid #fff; }
+    .status-item { display: flex; justify-content: space-between; margin: 10px 0; font-size: 18px; }
+    .status-value { font-weight: bold; padding: 5px 15px; border-radius: 20px; background: rgba(255,255,255,0.2); }
+    .controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px; margin: 30px 0; }
+    button { padding: 15px 20px; border: none; border-radius: 10px; font-size: 16px; font-weight: bold; cursor: pointer; transition: all 0.3s ease; text-transform: uppercase; letter-spacing: 1px; }
+    .btn-open { background: #4CAF50; color: white; }
+    .btn-close { background: #f44336; color: white; }
+    .btn-auto { background: #2196F3; color: white; }
+    button:hover { transform: translateY(-2px); box-shadow: 0 5px 15px rgba(0,0,0,0.3); }
+    button:active { transform: translateY(0); }
+    button:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+    .train-indicator { text-align: center; font-size: 24px; margin: 20px 0; padding: 15px; border-radius: 10px; font-weight: bold; }
+    .train-detected { background: #ff4444; animation: pulse 1s infinite; }
+    .train-clear { background: #44ff44; }
+    @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
+    .footer { text-align: center; margin-top: 30px; opacity: 0.8; font-size: 14px; }
+    .error-message { background: #ff4444; color: white; padding: 10px; border-radius: 5px; margin: 10px 0; display: none; }
+    @media (max-width: 600px) { .container { padding: 10px; margin: 10px; } .controls { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <div class='container'>
+    <h1>🚂 Smart Railway Crossing</h1>
+    
+    <!-- Error message div -->
+    <div class='error-message' id='errorMessage'></div>
+    
+    <!-- Status Section -->
+    <div class='status-box'>
+      <div class='status-item'><span>Gate Status:</span><span class='status-value' id='gateStatus'>Loading...</span></div>
+      <div class='status-item'><span>Control Mode:</span><span class='status-value' id='controlMode'>Loading...</span></div>
+    </div>
+    
+    <!-- Train Indicator -->
+    <div class='train-indicator' id='trainIndicator'>🚂 Checking for trains...</div>
+    
+    <!-- Controls Section -->
+    <div class='controls'>
+      <button class='btn-open' id='openBtn' onclick='sendCommand("open")'>🟢 Open Gate</button>
+      <button class='btn-close' id='closeBtn' onclick='sendCommand("close")'>🔴 Close Gate</button>
+      <button class='btn-auto' id='autoBtn' onclick='sendCommand("auto")'>⚡ Auto Mode</button>
+    </div>
+    
+    <!-- Footer -->
+    <div class='footer'>
+      <p>ESP32 Railway Crossing Control System</p>
+      <p>Last Update: <span id='lastUpdate'>Never</span></p>
+      <p>Status: <span id='connectionStatus'>Connecting...</span></p>
+    </div>
+  </div>
+
+  <script>
+    let isCommandInProgress = false;
+    
+    function showError(message) {
+      const errorDiv = document.getElementById('errorMessage');
+      errorDiv.textContent = message;
+      errorDiv.style.display = 'block';
+      setTimeout(() => { errorDiv.style.display = 'none'; }, 5000);
+    }
+    
+    function setButtonsEnabled(enabled) {
+      document.getElementById('openBtn').disabled = !enabled;
+      document.getElementById('closeBtn').disabled = !enabled;
+      document.getElementById('autoBtn').disabled = !enabled;
+    }
+    
+    function sendCommand(action) {
+      if (isCommandInProgress) {
+        showError('Please wait for the current command to complete');
+        return;
+      }
+      isCommandInProgress = true;
+      setButtonsEnabled(false);
+      fetch('/control?action=' + action)
+      .then(response => {
+        if (!response.ok) throw new Error('Network response was not ok');
+        return response.text();
+      })
+      .then(data => {
+        console.log('Command response:', data);
+        setTimeout(updateStatus, 500);
+      })
+      .catch(error => {
+        console.error('Command error:', error);
+        showError('Command failed: ' + error.message);
+      })
+      .finally(() => {
+        isCommandInProgress = false;
+        setButtonsEnabled(true);
+      });
+    }
+    
+    function updateStatus() {
+      fetch('/status')
+      .then(response => {
+        if (!response.ok) throw new Error('Status request failed');
+        return response.json();
+      })
+      .then(data => {
+        document.getElementById('gateStatus').textContent = data.gate;
+        document.getElementById('controlMode').textContent = data.manual ? 'Manual' : 'Automatic';
+        const trainIndicator = document.getElementById('trainIndicator');
+        if (data.train) {
+          trainIndicator.innerHTML = '🚨 TRAIN DETECTED!';
+          trainIndicator.className = 'train-indicator train-detected';
+        } else {
+          trainIndicator.innerHTML = '✅ Track Clear';
+          trainIndicator.className = 'train-indicator train-clear';
+        }
+        document.getElementById('lastUpdate').textContent = new Date().toLocaleTimeString();
+        document.getElementById('connectionStatus').textContent = 'Connected';
+      })
+      .catch(error => {
+        console.error('Status update failed:', error);
+        document.getElementById('connectionStatus').textContent = 'Connection Error';
+        showError('Failed to update status');
+      });
+    }
+    
+    setInterval(updateStatus, 2000);
+    setTimeout(updateStatus, 1000);
+  </script>
+</body>
+</html>
