@@ -17,6 +17,7 @@
     .btn-open { background: #4CAF50; color: white; }
     .btn-close { background: #f44336; color: white; }
     .btn-auto { background: #2196F3; color: white; }
+    .btn-simulate { background: #FF9800; color: white; }
     button:hover { transform: translateY(-2px); box-shadow: 0 5px 15px rgba(0,0,0,0.3); }
     button:active { transform: translateY(0); }
     button:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
@@ -25,7 +26,10 @@
     .train-clear { background: #44ff44; }
     @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
     .footer { text-align: center; margin-top: 30px; opacity: 0.8; font-size: 14px; }
-    .error-message { background: #ff4444; color: white; padding: 10px; border-radius: 5px; margin: 10px 0; display: none; }
+    .success-message { background: #4CAF50; color: white; padding: 10px; border-radius: 5px; margin: 10px 0; display: none; }
+    .demo-notice { background: rgba(255, 193, 7, 0.2); color: #fff; padding: 15px; border-radius: 10px; margin: 20px 0; border: 2px solid #FFC107; text-align: center; }
+    .simulation-controls { background: rgba(255,255,255,0.1); padding: 15px; border-radius: 10px; margin: 20px 0; }
+    .simulation-controls h3 { margin-bottom: 15px; color: #FFC107; }
     @media (max-width: 600px) { .container { padding: 10px; margin: 10px; } .controls { grid-template-columns: 1fr; } }
   </style>
 </head>
@@ -33,17 +37,23 @@
   <div class='container'>
     <h1>🚂 Smart Railway Crossing</h1>
     
-    <!-- Error message div -->
-    <div class='error-message' id='errorMessage'></div>
+    <!-- Demo Notice -->
+    <div class='demo-notice'>
+      🎮 <strong>DEMO MODE</strong> - This is a standalone simulation for demonstration purposes
+    </div>
+    
+    <!-- Success message div -->
+    <div class='success-message' id='successMessage'></div>
     
     <!-- Status Section -->
     <div class='status-box'>
-      <div class='status-item'><span>Gate Status:</span><span class='status-value' id='gateStatus'>Loading...</span></div>
-      <div class='status-item'><span>Control Mode:</span><span class='status-value' id='controlMode'>Loading...</span></div>
+      <div class='status-item'><span>Gate Status:</span><span class='status-value' id='gateStatus'>Closed</span></div>
+      <div class='status-item'><span>Control Mode:</span><span class='status-value' id='controlMode'>Manual</span></div>
+      <div class='status-item'><span>System Status:</span><span class='status-value' id='systemStatus'>Online</span></div>
     </div>
     
     <!-- Train Indicator -->
-    <div class='train-indicator' id='trainIndicator'>🚂 Checking for trains...</div>
+    <div class='train-indicator train-clear' id='trainIndicator'>✅ Track Clear</div>
     
     <!-- Controls Section -->
     <div class='controls'>
@@ -52,22 +62,41 @@
       <button class='btn-auto' id='autoBtn' onclick='sendCommand("auto")'>⚡ Auto Mode</button>
     </div>
     
+    <!-- Simulation Controls -->
+    <div class='simulation-controls'>
+      <h3>🎛️ Simulation Controls</h3>
+      <div class='controls'>
+        <button class='btn-simulate' onclick='simulateTrain()'>🚂 Simulate Train</button>
+        <button class='btn-simulate' onclick='resetSimulation()'>🔄 Reset</button>
+      </div>
+    </div>
+    
     <!-- Footer -->
     <div class='footer'>
-      <p>ESP32 Railway Crossing Control System</p>
-      <p>Last Update: <span id='lastUpdate'>Never</span></p>
-      <p>Status: <span id='connectionStatus'>Connecting...</span></p>
+      <p>Smart Railway Crossing Control System</p>
+      <p>Last Update: <span id='lastUpdate'>Just now</span></p>
+      <p>Status: <span id='connectionStatus'>Demo Mode - Standalone</span></p>
     </div>
   </div>
 
   <script>
-    let isCommandInProgress = false;
+    // Simulation state
+    let systemState = {
+      gateStatus: 'Closed',
+      isManualMode: true,
+      trainDetected: false,
+      isCommandInProgress: false,
+      autoModeEnabled: false
+    };
     
-    function showError(message) {
-      const errorDiv = document.getElementById('errorMessage');
-      errorDiv.textContent = message;
-      errorDiv.style.display = 'block';
-      setTimeout(() => { errorDiv.style.display = 'none'; }, 5000);
+    let trainSimulationTimeout = null;
+    
+    function showMessage(message, isSuccess = true) {
+      const messageDiv = document.getElementById('successMessage');
+      messageDiv.textContent = message;
+      messageDiv.style.display = 'block';
+      messageDiv.style.background = isSuccess ? '#4CAF50' : '#f44336';
+      setTimeout(() => { messageDiv.style.display = 'none'; }, 3000);
     }
     
     function setButtonsEnabled(enabled) {
@@ -76,61 +105,154 @@
       document.getElementById('autoBtn').disabled = !enabled;
     }
     
+    function updateDisplay() {
+      // Update gate status
+      document.getElementById('gateStatus').textContent = systemState.gateStatus;
+      
+      // Update control mode
+      document.getElementById('controlMode').textContent = systemState.isManualMode ? 'Manual' : 'Automatic';
+      
+      // Update train indicator
+      const trainIndicator = document.getElementById('trainIndicator');
+      if (systemState.trainDetected) {
+        trainIndicator.innerHTML = '🚨 TRAIN DETECTED!';
+        trainIndicator.className = 'train-indicator train-detected';
+      } else {
+        trainIndicator.innerHTML = '✅ Track Clear';
+        trainIndicator.className = 'train-indicator train-clear';
+      }
+      
+      // Update timestamp
+      document.getElementById('lastUpdate').textContent = new Date().toLocaleTimeString();
+      
+      // Update system status
+      document.getElementById('systemStatus').textContent = 'Online';
+    }
+    
     function sendCommand(action) {
-      if (isCommandInProgress) {
-        showError('Please wait for the current command to complete');
+      if (systemState.isCommandInProgress) {
+        showMessage('Please wait for the current command to complete', false);
         return;
       }
-      isCommandInProgress = true;
+      
+      systemState.isCommandInProgress = true;
       setButtonsEnabled(false);
-      fetch('/control?action=' + action)
-      .then(response => {
-        if (!response.ok) throw new Error('Network response was not ok');
-        return response.text();
-      })
-      .then(data => {
-        console.log('Command response:', data);
-        setTimeout(updateStatus, 500);
-      })
-      .catch(error => {
-        console.error('Command error:', error);
-        showError('Command failed: ' + error.message);
-      })
-      .finally(() => {
-        isCommandInProgress = false;
-        setButtonsEnabled(true);
-      });
-    }
-    
-    function updateStatus() {
-      fetch('/status')
-      .then(response => {
-        if (!response.ok) throw new Error('Status request failed');
-        return response.json();
-      })
-      .then(data => {
-        document.getElementById('gateStatus').textContent = data.gate;
-        document.getElementById('controlMode').textContent = data.manual ? 'Manual' : 'Automatic';
-        const trainIndicator = document.getElementById('trainIndicator');
-        if (data.train) {
-          trainIndicator.innerHTML = '🚨 TRAIN DETECTED!';
-          trainIndicator.className = 'train-indicator train-detected';
-        } else {
-          trainIndicator.innerHTML = '✅ Track Clear';
-          trainIndicator.className = 'train-indicator train-clear';
+      
+      // Simulate command processing delay
+      setTimeout(() => {
+        switch(action) {
+          case 'open':
+            if (systemState.trainDetected && !systemState.isManualMode) {
+              showMessage('Cannot open gate - Train detected in auto mode!', false);
+            } else {
+              systemState.gateStatus = 'Open';
+              systemState.isManualMode = true;
+              showMessage('Gate opened successfully');
+            }
+            break;
+            
+          case 'close':
+            systemState.gateStatus = 'Closed';
+            systemState.isManualMode = true;
+            showMessage('Gate closed successfully');
+            break;
+            
+          case 'auto':
+            systemState.isManualMode = false;
+            // In auto mode, respond to train detection
+            if (systemState.trainDetected) {
+              systemState.gateStatus = 'Closed';
+              showMessage('Auto mode enabled - Gate closed due to train detection');
+            } else {
+              systemState.gateStatus = 'Open';
+              showMessage('Auto mode enabled - Gate opened (track clear)');
+            }
+            break;
         }
-        document.getElementById('lastUpdate').textContent = new Date().toLocaleTimeString();
-        document.getElementById('connectionStatus').textContent = 'Connected';
-      })
-      .catch(error => {
-        console.error('Status update failed:', error);
-        document.getElementById('connectionStatus').textContent = 'Connection Error';
-        showError('Failed to update status');
-      });
+        
+        updateDisplay();
+        systemState.isCommandInProgress = false;
+        setButtonsEnabled(true);
+      }, 800); // Simulate network delay
     }
     
-    setInterval(updateStatus, 2000);
-    setTimeout(updateStatus, 1000);
+    function simulateTrain() {
+      if (systemState.trainDetected) {
+        showMessage('Train simulation already running!', false);
+        return;
+      }
+      
+      systemState.trainDetected = true;
+      showMessage('🚂 Train simulation started');
+      
+      // In auto mode, close the gate when train is detected
+      if (!systemState.isManualMode) {
+        systemState.gateStatus = 'Closed';
+        showMessage('Auto mode: Gate closed for approaching train');
+      }
+      
+      updateDisplay();
+      
+      // Clear train after 10 seconds
+      trainSimulationTimeout = setTimeout(() => {
+        systemState.trainDetected = false;
+        
+        // In auto mode, open the gate when train passes
+        if (!systemState.isManualMode) {
+          systemState.gateStatus = 'Open';
+          showMessage('Auto mode: Gate opened - train has passed');
+        } else {
+          showMessage('Train has passed - track clear');
+        }
+        
+        updateDisplay();
+      }, 10000);
+    }
+    
+    function resetSimulation() {
+      // Clear any running train simulation
+      if (trainSimulationTimeout) {
+        clearTimeout(trainSimulationTimeout);
+        trainSimulationTimeout = null;
+      }
+      
+      // Reset to initial state
+      systemState = {
+        gateStatus: 'Closed',
+        isManualMode: true,
+        trainDetected: false,
+        isCommandInProgress: false,
+        autoModeEnabled: false
+      };
+      
+      updateDisplay();
+      setButtonsEnabled(true);
+      showMessage('🔄 System reset successfully');
+    }
+    
+    // Auto mode logic - continuously monitor train status
+    function autoModeLogic() {
+      if (!systemState.isManualMode && !systemState.isCommandInProgress) {
+        if (systemState.trainDetected && systemState.gateStatus === 'Open') {
+          systemState.gateStatus = 'Closed';
+          updateDisplay();
+        } else if (!systemState.trainDetected && systemState.gateStatus === 'Closed') {
+          systemState.gateStatus = 'Open';
+          updateDisplay();
+        }
+      }
+    }
+    
+    // Initialize display
+    updateDisplay();
+    
+    // Run auto mode logic every 2 seconds
+    setInterval(autoModeLogic, 2000);
+    
+    // Update timestamp every second
+    setInterval(() => {
+      document.getElementById('lastUpdate').textContent = new Date().toLocaleTimeString();
+    }, 1000);
   </script>
 </body>
 </html>
